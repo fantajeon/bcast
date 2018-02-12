@@ -16,9 +16,15 @@ import (
 	"time"
 )
 
+const (
+	MSG_TYPE_DATA = itoa
+	MSG_TYPE_CLOSE
+)
+
 // Message is an internal structure to pack messages together with
 // info about sender.
 type Message struct {
+	type int
 	sender  *Member
 	payload interface{}
 	clock   int
@@ -87,6 +93,10 @@ func (g *Group) Leave(leaving *Member) error {
 		return errors.New("Could not find provided memeber for removal")
 	}
 	g.members = append(g.members[:memberIndex], g.members[memberIndex+1:]...)
+
+	go func() {
+		Member.Read <- Message{ type: MSG_TYPE_CLOSE, sender: nil, payload: nil}
+	}
 	leaving.close <- true // TODO: need to handle the case where there
 	// is still stuff in this Members priorityQueue
 	return nil
@@ -157,7 +167,7 @@ func (g *Group) Broadcast(timeout time.Duration) {
 
 // Send broadcasts a message to every one of a Group's members.
 func (g *Group) Send(val interface{}) {
-	g.in <- Message{sender: nil, payload: val}
+	g.in <- Message{ type: MSG_TYPE_DATA, sender: nil, payload: val}
 }
 
 // Close removes the member it is called on from its broadcast group.
@@ -168,12 +178,16 @@ func (m *Member) Close() {
 // Send broadcasts a message from one Member to the channels of all
 // the other members in its group.
 func (m *Member) Send(val interface{}) {
-	m.group.in <- Message{sender: m, payload: val}
+	m.group.in <- Message{ type: MSG_TYPE_DATA, sender: m, payload: val}
 }
 
 // Recv reads one value from the member's Read channel
 func (m *Member) Recv() interface{} {
-	return <-m.Read
+	p := <- m.Read
+	if p.type == MSG_TYPE_CLOSE ) {
+		return nil
+	}
+	return p
 }
 
 func (m *Member) listen() {
