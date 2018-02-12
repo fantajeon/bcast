@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	MSG_TYPE_DATA = itoa
+	MSG_TYPE_DATA int = iota
 	MSG_TYPE_CLOSE
 )
 
@@ -94,7 +94,7 @@ func (g *Group) Leave(leaving *Member) error {
 	}
 	g.members = append(g.members[:memberIndex], g.members[memberIndex+1:]...)
 	go func() {
-		Member.Read <- Message{msg_type: MSG_TYPE_CLOSE, sender: nil, payload: nil}
+		leaving.Read <- Message{msg_type: MSG_TYPE_CLOSE, sender: nil, payload: nil}
 	}()
 	leaving.close <- true // TODO: need to handle the case where there
 	// is still stuff in this Members priorityQueue
@@ -182,11 +182,7 @@ func (m *Member) Send(val interface{}) {
 
 // Recv reads one value from the member's Read channel
 func (m *Member) Recv() interface{} {
-	p := <-m.Read
-	if p.msg_type == MSG_TYPE_CLOSE {
-		return nil
-	}
-	return p
+	return <-m.Read
 }
 
 func (m *Member) listen() {
@@ -225,7 +221,11 @@ func (m *Member) trySend(message *Message) bool {
 	shouldSend := message.clock == m.clock
 	if shouldSend {
 		if message.sender != m {
-			m.Read <- message.payload
+			if message.msg_type == MSG_TYPE_DATA {
+				m.Read <- message.payload
+			} else {
+				m.Read <- nil
+			}
 		}
 		m.clock++
 	}
