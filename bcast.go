@@ -60,8 +60,8 @@ func (g *Group) MemberCount() int {
 // Members returns a slice of Members that are currently in the Group.
 func (g *Group) Members() []*Member {
 	g.memberLock.Lock()
+	defer g.memberLock.Unlock()
 	res := g.members[:]
-	g.memberLock.Unlock()
 	return res
 }
 
@@ -75,6 +75,7 @@ func (g *Group) Join() *Member {
 // Leave removes the provided member from the group
 func (g *Group) Leave(leaving *Member) error {
 	g.memberLock.Lock()
+	defer g.memberLock.Unlock()
 	memberIndex := -1
 	for index, member := range g.members {
 		if member == leaving {
@@ -83,20 +84,21 @@ func (g *Group) Leave(leaving *Member) error {
 		}
 	}
 	if memberIndex == -1 {
-		g.memberLock.Unlock()
 		return errors.New("Could not find provided memeber for removal")
 	}
 	g.members = append(g.members[:memberIndex], g.members[memberIndex+1:]...)
 	leaving.close <- true // TODO: need to handle the case where there
 	// is still stuff in this Members priorityQueue
-	g.memberLock.Unlock()
 	return nil
 }
 
 // Add adds a member to the group for the provided interface channel.
 func (g *Group) Add(memberChannel chan interface{}) *Member {
 	g.memberLock.Lock()
+	defer g.memberLock.Unlock()
+
 	g.clockLock.Lock()
+	defer g.clockLock.Unlock()
 	member := &Member{
 		group:        g,
 		Read:         memberChannel,
@@ -107,8 +109,6 @@ func (g *Group) Add(memberChannel chan interface{}) *Member {
 	}
 	go member.listen()
 	g.members = append(g.members, member)
-	g.clockLock.Unlock()
-	g.memberLock.Unlock()
 	return member
 }
 
@@ -128,12 +128,14 @@ func (g *Group) Broadcast(timeout time.Duration) {
 		select {
 		case received := <-g.in:
 			g.memberLock.Lock()
-			g.clockLock.Lock()
+
 			members := g.members[:]
+
+			g.clockLock.Lock()
 			received.clock = g.clock
 			g.clock++
 			g.clockLock.Unlock()
-			g.memberLock.Unlock()
+
 			for _, member := range members {
 				// This is done in a goroutine because if it
 				// weren't it would be a blocking call
@@ -141,6 +143,8 @@ func (g *Group) Broadcast(timeout time.Duration) {
 					member.send <- received
 				}(member, received)
 			}
+
+			g.memberLock.Unlock()
 		case <-timeoutChannel:
 			if timeout > 0 {
 				return
